@@ -1,0 +1,31 @@
+# ESP-IDF CMake Code Style
+# Reference: https://docs.espressif.com/projects/esp-idf/en/v3.3.4/contribute/style-guide.html#cmake-code-style
+# cmake-format: https://github.com/cheshirekow/cmake_format
+
+additional_commands:
+  idf_component_register:
+    kwargs:
+      SRCS: '*'
+      INCLUDE_DIRS: '*'
+      PRIV_REQUIRES: '*'
+      REQUIRES: '*'
+      EMBED_FILES: '*'
+      EMBED_TXTFILES: '*'
+      SRCEXCLUDE: '*'
+
+bullet_char: '*'
+dangle_parens: false
+enum_char: .
+line_ending: lf
+line_width: 120
+max_pargs_hwrap: 3
+separate_ctrl_name_with_space: false
+separate_fn_name_with_space: false
+tab_size: 4
+
+# Use lowercase for commands, functions, and macros
+use_snake_case: true
+
+# Markdown-style comment formatting
+markup:
+  enable_markup: true

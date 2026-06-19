@@ -1,0 +1,8 @@
+#
+# IDF Component Manager Manifest File
+# Documentation: https://docs.espressif.com/projects/idf-component-manager/en/latest/reference/manifest_file.html
+#
+
+dependencies:
+  espressif/mdns: ^1.4.0
+  espressif/cjson: ^1.7.19~2

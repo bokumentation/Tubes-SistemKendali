@@ -1,0 +1,14 @@
+{
+    "lsp": {
+        "clangd": {
+            "binary": {
+                "path": "clangd-22",
+                "arguments": [
+                    "--query-driver=/home/loq/.espressif/tools/**/*elf/bin/*",
+                    "--background-index",
+                    "--log=verbose"
+                ]
+            }
+        }
+    }
+}

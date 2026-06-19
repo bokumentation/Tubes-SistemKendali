@@ -1,0 +1,21 @@
+# top-most EditorConfig file
+root = true
+
+[*]
+# --convert-tabs / --indent=spaces=4
+indent_style = space
+indent_size = 4
+
+# --max-continuation-indent=120
+max_line_length = 120
+
+# Standard professional defaults
+charset = utf-8
+trim_trailing_whitespace = true
+insert_final_newline = true
+end_of_line = lf
+
+[*.{c,cpp,h,hpp}]
+# Ensure C++ specific files follow the 4-space rule
+indent_size = 4
+tab_width = 4

@@ -1,0 +1,23 @@
+Documentation:
+    CommentFormat: Doxygen
+
+InlayHints:
+    ParameterNames: false
+
+Hover:
+    ShowAKA: false
+
+CompileFlags:
+    BuiltinHeaders: QueryDriver
+
+    CompilationDatabase: build/
+    Remove:
+        - -f*
+        - -m*
+    Add:
+        - -isystem
+        - -xc++
+        - -Wformat
+        - -Werror=format
+        - -Wall
+        - -Wextra

@@ -1,0 +1,8 @@
+{
+    "clangd.path": "clangd-22",
+    "clangd.arguments": [
+        "--query-driver=/home/loq/.espressif/tools/**/*elf/bin/*",
+        "--background-index",
+        "--log=verbose"
+    ]
+}

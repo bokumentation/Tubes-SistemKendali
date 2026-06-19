@@ -1,0 +1,31 @@
+# Clangd configuration for Linux. Based on my Linux username are "loq". The default ESP-IDF v6.0 uses clangd.
+# Documentation: https://clangd.llvm.org/config, https://docs.espressif.com/projects/espressif-ide/en/latest/additionalfeatures/clangd_cdt_support.html
+
+# Render "Doxygen" format. Only works on Clangd-22
+Documentation:
+    CommentFormat: Doxygen
+
+InlayHints:
+    ParameterNames: false
+
+Hover:
+    ShowAKA: false
+
+CompileFlags:
+    # Using QueryDriver for llvm clangd-22.
+    BuiltinHeaders: QueryDriver
+
+    CompilationDatabase: build/
+    Remove:
+        - -f*
+        - -m*
+    Add:
+        - -isystem
+        - /home/loq/.espressif/tools/riscv32-esp-elf/esp-15.2.0_20251204/riscv32-esp-elf/lib/gcc/riscv32-esp-elf/14.2.0/include
+        - /home/loq/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20241119/xtensa-esp-elf/lib/gcc/xtensa-esp-elf/14.2.0/include
+        - -std=c++17
+        - -xc++
+        - -Wformat
+        - -Werror=format
+        - -Wall
+        - -Wextra

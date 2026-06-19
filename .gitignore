@@ -1,0 +1,29 @@
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*:Zone.Identifier
+
+# Editor
+.cache/
+# .vscode/
+# .zed/
+
+# ESP-IDF Build
+build/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.*.old
+compile_commands.json
+.clangd/
+
+# Environment
+.env
+.env.local
+.env.test

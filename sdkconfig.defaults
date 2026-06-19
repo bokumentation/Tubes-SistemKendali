@@ -1,0 +1,19 @@
+#
+# This is sdk configuration for the ESP-IDF starter project
+# Documentation: https://docs.espressif.com/projects/arduino-esp32/en/latest/esp-idf_component.html
+#
+
+# mbedTLS
+CONFIG_MBEDTLS_PSK_MODES=y
+CONFIG_MBEDTLS_KEY_EXCHANGE_PSK=y
+CONFIG_MBEDTLS_KEY_EXCHANGE_ECDHE_PSK=y
+CONFIG_MBEDTLS_KEY_EXCHANGE_RSA_PSK=y
+
+# Partition Table
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="extras/partitions-4mb.csv"
+CONFIG_PARTITION_TABLE_FILENAME="extras/partitions-4mb.csv"
+
+# Logging
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_DEFAULT_LEVEL=3
