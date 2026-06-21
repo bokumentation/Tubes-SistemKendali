@@ -1,4 +1,6 @@
 #include "wifi_manager.h"
+#include "shared_data.h"
+#include "motor_control.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -32,6 +34,16 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
         printf("WiFi disconnected, reason: %d\n", event->reason);
+
+        auto_mode = 0;
+        manual_override = 0;
+        motor_all_stop();
+        motor_fr_speed = 0;
+        motor_fl_speed = 0;
+        motor_br_speed = 0;
+        motor_bl_speed = 0;
+        printf("WiFi lost -> robot stopped\n");
+
         if (retry_count < WIFI_MAX_RETRY) {
             retry_count++;
             printf("Reconnecting... attempt %d/%d\n", retry_count, WIFI_MAX_RETRY);
