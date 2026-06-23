@@ -2,7 +2,6 @@
 #define MOTOR_CONTROL_H
 
 #include <stdint.h>
-#include <stdbool.h>
 
 void motor_control_init(void);
 void motor_set_speed(int32_t fr_speed, int32_t fl_speed,

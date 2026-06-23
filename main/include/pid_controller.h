@@ -24,6 +24,8 @@ void pid_ctrl_init(pid_ctrl_t *pid, float kp, float ki, float kd, float dt,
                    float out_min, float out_max);
 float pid_ctrl_compute(pid_ctrl_t *pid, float setpoint, float measurement);
 void pid_ctrl_reset(pid_ctrl_t *pid);
+void pid_ctrl_save_to_nvs(pid_ctrl_t *pid, float setpoint);
+int pid_ctrl_load_from_nvs(pid_ctrl_t *pid, float *setpoint);
 
 #ifdef __cplusplus
 }

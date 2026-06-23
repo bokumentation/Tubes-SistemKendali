@@ -14,7 +14,7 @@
 #define SPEED_TO_TICKS(s) ((uint32_t)((s) * 10))
 
 /* Motor dead zone: DRV8833 + N20 motors need at least this PWM% to overcome static friction */
-#define MOTOR_MIN_SPEED 35
+#define MOTOR_MIN_SPEED 30
 
 /* Each motor has its own operator, 2 comparators, 2 generators */
 typedef struct {

@@ -2,12 +2,11 @@
  * obstacle_avoidance.c — obstacle avoidance with PID speed control + steering
  *
  * Key improvements over original:
- *   1. Differential steering — compares left/right sensors and turns toward
- *      the clearer path instead of just stopping.
- *   2. Smooth transition zone — blends PID output into MAX_SPEED gradually
- *      (no 50% PWM jump).
- *   3. Retuned PID: Kp=2.5, Ki=0.05, Kd=0.3, DT=0.05 (20 Hz loop).
- *   4. EMA_ALPHA=0.5 — less filter lag, still smooths jitter.
+ *   1. Dual drive modes: CRUISE (Tesla AEB-style) + MAINTAIN (PID wall-follow)
+ *   2. Side sensors assist main sensor via get_min_front() — speed adjusts, no rotation.
+ *   3. Smooth transition zone — blends PID output into MAX_SPEED gradually.
+ *   4. Retuned PID: Kp=2.5, Ki=0.05, Kd=0.3, DT=0.05 (20 Hz loop).
+ *   5. EMA_ALPHA=0.5 — less filter lag, still smooths jitter.
  */
 
 #include "obstacle_avoidance.h"
@@ -18,6 +17,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_task_wdt.h"
 
 #include "pin_definition.h"
 #include "ultrasonic.h"
@@ -32,15 +32,15 @@
 #define PID_DT              0.05f         /* 20 Hz control loop */
 #define BACK_THRESHOLD      15.0f          /* min distance behind before blocking reverse */
 #define OVERRIDE_TIMEOUT    40             /* ~2 s @ 20 Hz before manual override expires */
-#define EMA_ALPHA           0.5f           /* exponential moving average (0 = no update, 1 = raw) */
-
-/* Steering */
-#define STEER_GAIN          0.6f           /* how aggressively to turn (0..1) */
-#define STEER_DEADBAND      5.0f           /* ignore L/R sensor diff below this (cm) */
+#define EMA_ALPHA           0.8f           /* exponential moving average (0 = no update, 1 = raw) */
 
 /* Smooth‑transition zone (40 cm → 60 cm) */
 #define TRANSITION_LOW      40.0f          /* below this ≡ full PID authority */
 #define TRANSITION_HIGH     60.0f          /* above this ≡ full MAX_SPEED */
+
+/* CRUISE mode distance-proportional braking */
+#define CRUISE_FULL_SPEED    80.0f         /* distance above which → full speed */
+#define CRUISE_STOP_DIST     15.0f         /* distance below which → stop */
 
 /* Emergency reverse */
 #define EMERGENCY_THRESHOLD 10.0f          /* below this → reverse (if back is clear) */
@@ -49,7 +49,7 @@
 /* Feed‑forward brake (when closing speed > BRAKE_VEL_THRESH while < BRAKE_RANGE) */
 #define BRAKE_RANGE         60.0f
 #define BRAKE_VEL_THRESH    10.0f          /* cm/s */
-#define BRAKE_GAIN          0.3f
+#define BRAKE_GAIN          0.6f
 
 /* ================================================================ */
 /* Globals (shared with web dashboard via shared_data.h)             */
@@ -77,10 +77,15 @@ volatile int auto_mode       = 0;
 
 volatile float speed_setpoint = 40.0f;
 
+volatile int drive_mode      = DRIVE_MODE_CRUISE;
+
+volatile float pid_output_display = 0;
+
 float graph_error[GRAPH_SIZE];
 float graph_output[GRAPH_SIZE];
 float graph_setpoint[GRAPH_SIZE];
 int   graph_index = 0;
+int   graph_sample_count = 0;
 
 /* ---- internal state ---- */
 static float prev_min_front = 999.0f;
@@ -93,22 +98,27 @@ static bool  pid_was_active = false;   /* tracks whether PID was in control last
 static void read_all_sensors(void)
 {
     float val;
-
-    val = ultrasonic_measure_cm(&front_sensor);
+    val = ultrasonic_get_cm(&front_sensor);
     if (val >= 0)
         sensor_front_cm = sensor_front_cm * (1.0f - EMA_ALPHA) + val * EMA_ALPHA;
 
-    val = ultrasonic_measure_cm(&front_left_sensor);
+    val = ultrasonic_get_cm(&front_left_sensor);
     if (val >= 0)
         sensor_front_left_cm = sensor_front_left_cm * (1.0f - EMA_ALPHA) + val * EMA_ALPHA;
 
-    val = ultrasonic_measure_cm(&front_right_sensor);
+    val = ultrasonic_get_cm(&front_right_sensor);
     if (val >= 0)
         sensor_front_right_cm = sensor_front_right_cm * (1.0f - EMA_ALPHA) + val * EMA_ALPHA;
 
-    val = ultrasonic_measure_cm(&back_sensor);
+    val = ultrasonic_get_cm(&back_sensor);
     if (val >= 0)
         sensor_back_cm = sensor_back_cm * (1.0f - EMA_ALPHA) + val * EMA_ALPHA;
+
+    /* Fire all sensors for the next loop */
+    ultrasonic_trigger(&front_sensor);
+    ultrasonic_trigger(&front_left_sensor);
+    ultrasonic_trigger(&front_right_sensor);
+    ultrasonic_trigger(&back_sensor);
 }
 
 static float get_min_front(void)
@@ -118,41 +128,6 @@ static float get_min_front(void)
     if (sensor_front_left_cm  >= 0 && sensor_front_left_cm  < min_val) min_val = sensor_front_left_cm;
     if (sensor_front_right_cm >= 0 && sensor_front_right_cm < min_val) min_val = sensor_front_right_cm;
     return (min_val > 998.0f) ? -1 : min_val;
-}
-
-/* ================================================================ */
-/* Steering logic                                                    */
-/* ================================================================ */
-/*
- * Returns a steering bias in the range [-MAX_SPEED, +MAX_SPEED].
- * Positive  → steer right (left wheels faster)
- * Negative  → steer left  (right wheels faster)
- *
- * Only active when both left and right sensors are valid and the
- * difference exceeds STEER_DEADBAND.
- */
-static float compute_steering(float min_front)
-{
-    /* Only steer if we have both side sensors and obstacle is close */
-    if (sensor_front_left_cm < 0 || sensor_front_right_cm < 0)
-        return 0;
-
-    if (min_front > 80.0f)
-        return 0;   /* plenty of room → no need to steer */
-
-    float diff = sensor_front_left_cm - sensor_front_right_cm;
-
-    if (fabsf(diff) < STEER_DEADBAND)
-        return 0;
-
-    /* diff > 0 → left side clearer → turn left */
-    float steer = diff * STEER_GAIN;
-
-    /* Scale so that extreme differences (~40 cm) produce ~MAX_SPEED bias */
-    if (steer >  MAX_SPEED) steer =  MAX_SPEED;
-    if (steer < -MAX_SPEED) steer = -MAX_SPEED;
-
-    return steer;
 }
 
 /* ================================================================ */
@@ -176,10 +151,16 @@ static float smooth_transition(float min_front, float pid_output)
 /* ================================================================ */
 static void avoid_task(void *arg)
 {
+    esp_task_wdt_add(NULL);
 
     /* Tuned PID: Kp=2.5  Ki=0.05  Kd=0.3  dt=0.05  out[0, 100] */
-    pid_ctrl_init(&speed_pid, 2.5f, 0.05f, 0.3f, PID_DT, 0, MAX_SPEED);
+    pid_ctrl_init(&speed_pid, 2.5f, 0.15f, 0.3f, PID_DT, -50, MAX_SPEED);
     speed_pid.derivative_filter = 0.4f;   /* moderate D‑filtering */
+
+    /* Restore PID params from NVS if available, otherwise save defaults */
+    if (pid_ctrl_load_from_nvs(&speed_pid, (float *)&speed_setpoint) != 0) {
+        pid_ctrl_save_to_nvs(&speed_pid, speed_setpoint);
+    }
 
     while (1) {
         read_all_sensors();
@@ -216,29 +197,40 @@ static void avoid_task(void *arg)
                     pid_was_active = false;
                     steer_bias = 0;
 
+                } else if (drive_mode == DRIVE_MODE_CRUISE) {
+                    /* ========================================== */
+                    /* CRUISE mode: distance-proportional braking  */
+                    /* ========================================== */
+                    if (min_front >= CRUISE_FULL_SPEED) {
+                        speed_out = MAX_SPEED;
+                    } else if (min_front <= CRUISE_STOP_DIST) {
+                        speed_out = 0;
+                    } else {
+                        float t = (min_front - CRUISE_STOP_DIST) / (CRUISE_FULL_SPEED - CRUISE_STOP_DIST);
+                        speed_out = (float)MAX_SPEED * t;
+                    }
+                    pid_was_active = false;
+                    steer_bias = 0;
+
                 } else {
-                    /* ---------------------------------------------------- */
-                    /* Normal PID zone (≥ 10 cm)                            */
-                    /* ---------------------------------------------------- */
+                    /* ========================================== */
+                    /* MAINTAIN mode: PID wall-follow              */
+                    /* ========================================== */
                     if (!pid_was_active) {
                         pid_ctrl_reset(&speed_pid);
                     }
 
-                    float pid_out = pid_ctrl_compute(&speed_pid, speed_setpoint, min_front);
-                    if (pid_out < 0) pid_out = 0;
-
-                    /* Smooth transition to MAX_SPEED when clear path */
+                    float pid_out = pid_ctrl_compute(&speed_pid, min_front, speed_setpoint);
                     speed_out = smooth_transition(min_front, pid_out);
 
-                    /* Feed-forward braking */
-                    float velocity = (prev_min_front - min_front) / PID_DT;
-                    if (min_front < BRAKE_RANGE && velocity > BRAKE_VEL_THRESH) {
-                        speed_out -= velocity * BRAKE_GAIN;
-                        if (speed_out < 0) speed_out = 0;
+                    /* Feed-forward braking (only when moving forward) */
+                    if (speed_out > 0) {
+                        float velocity = (prev_min_front - min_front) / PID_DT;
+                        if (min_front < BRAKE_RANGE && velocity > BRAKE_VEL_THRESH) {
+                            speed_out -= velocity * BRAKE_GAIN;
+                            if (speed_out < 0) speed_out = 0;
+                        }
                     }
-
-                    /* Steering bias — only when we're moving forward and not emergency */
-                    steer_bias = compute_steering(min_front);
 
                     pid_was_active = true;
                 }
@@ -246,29 +238,11 @@ static void avoid_task(void *arg)
                 prev_min_front = min_front;
             }
 
-            /* ---- Apply steering to wheel speeds ---- */
+            /* All wheels same speed — no rotation */
             int32_t fr = (int32_t)speed_out;
             int32_t fl = (int32_t)speed_out;
             int32_t br = (int32_t)speed_out;
             int32_t bl = (int32_t)speed_out;
-
-            if (speed_out > 0) {
-                /* Only steer when moving forward */
-                if (steer_bias > 0) {
-                    /* steer right: left side faster, right side slower */
-                    fl = (int32_t)(speed_out + steer_bias);
-                    bl = (int32_t)(speed_out + steer_bias);
-                    fr = (int32_t)(speed_out - steer_bias);
-                    br = (int32_t)(speed_out - steer_bias);
-                } else if (steer_bias < 0) {
-                    /* steer left: right side faster */
-                    float bias = -steer_bias;
-                    fr = (int32_t)(speed_out + bias);
-                    br = (int32_t)(speed_out + bias);
-                    fl = (int32_t)(speed_out - bias);
-                    bl = (int32_t)(speed_out - bias);
-                }
-            }
 
             /* Clamp */
             #define CLAMP(v, lo, hi) do { if ((v) < (lo)) (v) = (lo); if ((v) > (hi)) (v) = (hi); } while(0)
@@ -283,12 +257,14 @@ static void avoid_task(void *arg)
             motor_fl_speed = fl;
             motor_br_speed = br;
             motor_bl_speed = bl;
+            pid_output_display = speed_out;
 
             /* Record graph data */
-            graph_error[graph_index]   = speed_setpoint - min_front;
+            graph_error[graph_index]   = min_front - speed_setpoint;
             graph_output[graph_index]  = speed_out;
             graph_setpoint[graph_index] = speed_setpoint;
             graph_index = (graph_index + 1) % GRAPH_SIZE;
+            if (graph_sample_count < GRAPH_SIZE) graph_sample_count++;
         }
 
         /* ==================================================== */
@@ -307,6 +283,7 @@ static void avoid_task(void *arg)
         }
 
         vTaskDelay(pdMS_TO_TICKS((int)(PID_DT * 1000)));
+        esp_task_wdt_reset();
     }
 }
 

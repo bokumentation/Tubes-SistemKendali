@@ -91,7 +91,8 @@ canvas{width:100%;height:180px;border-radius:6px;border:1px solid #e2e8f0;backgr
   <div class="right-col">
     <div class="card"><h2>Control</h2>
       <div class="mode-row">
-        <button class="btn btn-auto" id="autoBtn">AUTO</button>
+        <button class="btn btn-auto" id="cruiseBtn">D</button>
+        <button class="btn btn-auto" id="wallBtn">R</button>
         <button class="btn btn-stop2" id="stopBtn">STOP</button>
         <span class="mode-lbl" id="modeLabel">Manual</span>
       </div>
@@ -115,129 +116,197 @@ canvas{width:100%;height:180px;border-radius:6px;border:1px solid #e2e8f0;backgr
 </div>
 
 <script>
-let ac=null, failCount=0;
+var ws = null;
+var reconnectTimer = null;
 
-function sc(c){
-  const s=document.getElementById('spd').value;
-  fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:c,speed:parseInt(s)})})
-  .then(r=>r.json()).then(d=>document.getElementById('st').textContent=d.status).catch(()=>{});
-  document.getElementById('st').textContent=c.toUpperCase();
-  if(c==='stop'){ac=null;}else{ac=c;}
+function setOnline(online) {
+  if (online) {
+    document.getElementById('connDot').style.background = '#22c55e';
+    document.getElementById('connTxt').textContent = 'ONLINE';
+    document.getElementById('connTxt').style.color = '#16a34a';
+  } else {
+    document.getElementById('connDot').style.background = '#ef4444';
+    document.getElementById('connTxt').textContent = 'OFFLINE';
+    document.getElementById('connTxt').style.color = '#dc2626';
+  }
 }
 
-document.querySelectorAll('.dpad button[data-c]').forEach(b=>{
-  const c=b.getAttribute('data-c');
-  b.addEventListener('mousedown',e=>{e.preventDefault();sc(c);});
-  b.addEventListener('mouseup',()=>{sc('stop');});
-  b.addEventListener('mouseleave',()=>{sc('stop');});
-  b.addEventListener('touchstart',e=>{e.preventDefault();sc(c);});
-  b.addEventListener('touchend',e=>{e.preventDefault();sc('stop');});
-  b.addEventListener('touchcancel',e=>{e.preventDefault();sc('stop');});
+function wsConnect() {
+  if (ws) { ws.close(); ws = null; }
+
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var url = proto + '//' + location.host + '/ws';
+  ws = new WebSocket(url);
+
+  ws.onopen = function() {
+    setOnline(true);
+    document.getElementById('st').textContent = 'WS connected';
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+  };
+
+  ws.onmessage = function(evt) {
+    try {
+      var d = JSON.parse(evt.data);
+      updateUI(d);
+    } catch(e) {}
+  };
+
+  ws.onclose = function() {
+    setOnline(false);
+    document.getElementById('st').textContent = 'WS disconnected';
+    if (!reconnectTimer) reconnectTimer = setTimeout(wsConnect, 2000);
+  };
+
+  ws.onerror = function() {
+    ws.close();
+  };
+}
+
+function updateUI(d) {
+  document.getElementById('sf').innerHTML = d.sensors.front.toFixed(1) + ' cm';
+  document.getElementById('sl').innerHTML = d.sensors.left.toFixed(1) + ' cm';
+  document.getElementById('sr').innerHTML = d.sensors.right.toFixed(1) + ' cm';
+  document.getElementById('sb').innerHTML = d.sensors.back.toFixed(1) + ' cm';
+  setCellColor('sf', d.sensors.front, 40);
+  setCellColor('sl', d.sensors.left, 40);
+  setCellColor('sr', d.sensors.right, 40);
+  setCellColor('sb', d.sensors.back, 15);
+  drawGraph(d.graph);
+  if (d.auto_mode) {
+    if (d.drive_mode === 0) {
+      document.getElementById('cruiseBtn').classList.add('on');
+      document.getElementById('wallBtn').classList.remove('on');
+      document.getElementById('modeLabel').textContent = 'Cruise';
+    } else {
+      document.getElementById('cruiseBtn').classList.remove('on');
+      document.getElementById('wallBtn').classList.add('on');
+      document.getElementById('modeLabel').textContent = 'Maintain';
+    }
+  } else {
+    document.getElementById('cruiseBtn').classList.remove('on');
+    document.getElementById('wallBtn').classList.remove('on');
+    document.getElementById('modeLabel').textContent = 'Manual';
+  }
+  document.getElementById('svAll').textContent = d.pid.output;
+  document.getElementById('spe').textContent = d.pid.error.toFixed(1);
+  document.getElementById('spo').textContent = d.pid.output.toFixed(0);
+}
+
+function sc(c) {
+  var s = document.getElementById('spd').value;
+  fetch('/api/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cmd:c,speed:parseInt(s)})})
+  .then(function(r){return r.json()}).then(function(d){document.getElementById('st').textContent=d.status}).catch(function(){});
+  document.getElementById('st').textContent = c.toUpperCase();
+}
+
+document.querySelectorAll('.dpad button[data-c]').forEach(function(b){
+  var c = b.getAttribute('data-c');
+  b.addEventListener('mousedown', function(e){e.preventDefault();sc(c);});
+  b.addEventListener('mouseup', function(){sc('stop');});
+  b.addEventListener('mouseleave', function(){sc('stop');});
+  b.addEventListener('touchstart', function(e){e.preventDefault();sc(c);});
+  b.addEventListener('touchend', function(e){e.preventDefault();sc('stop');});
+  b.addEventListener('touchcancel', function(e){e.preventDefault();sc('stop');});
 });
 
-document.addEventListener('keydown',e=>{
+document.addEventListener('keydown', function(e){
   if(e.repeat)return;
-  if(e.key===' '){e.preventDefault();document.getElementById('autoBtn').click();return}
-  const m={w:'forward',a:'left',s:'stop',d:'right',x:'backward'};
-  const c=m[e.key.toLowerCase()];
+  if(e.key===' '){e.preventDefault();document.getElementById('cruiseBtn').click();return}
+  var m={w:'forward',a:'left',s:'stop',d:'right',x:'backward'};
+  var c=m[e.key.toLowerCase()];
   if(c){e.preventDefault();sc(c)}
 });
-document.addEventListener('keyup',e=>{
-  const m={w:'forward',a:'left',s:'stop',d:'right',x:'backward'};
-  const c=m[e.key.toLowerCase()];
+document.addEventListener('keyup', function(e){
+  var m={w:'forward',a:'left',s:'stop',d:'right',x:'backward'};
+  var c=m[e.key.toLowerCase()];
   if(c){e.preventDefault();sc('stop')}
 });
 
-document.getElementById('autoBtn').onclick=()=>{
-  fetch('/api/status').then(r=>r.json()).then(d=>{
-    const mode=d.auto_mode?'stop':'auto';
-    fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode})});
-    if(mode==='auto'){
-      document.getElementById('autoBtn').classList.add('on');
-      document.getElementById('modeLabel').textContent='Auto'}
-    else{
-      document.getElementById('autoBtn').classList.remove('on');
-      document.getElementById('modeLabel').textContent='Manual'}
-  })
-};
-document.getElementById('stopBtn').onclick=()=>{
-  fetch('/api/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:'{"mode":"stop"}'});
-  document.getElementById('autoBtn').classList.remove('on');
-  document.getElementById('modeLabel').textContent='Manual';
-  fetch('/api/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cmd:'stop',speed:0})})
-};
-document.getElementById('spBtn').onclick=()=>{
-  const sp=parseFloat(document.getElementById('spsp').value);
-  const kp=parseFloat(document.getElementById('spkp').value);
-  const ki=parseFloat(document.getElementById('spki').value);
-  const kd=parseFloat(document.getElementById('spkd').value);
-  if(isNaN(sp)||isNaN(kp)||isNaN(ki)||isNaN(kd)){document.getElementById('st').textContent='Invalid input';return}
-  document.getElementById('st').textContent='Sending...';
-  fetch('/api/pid',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({setpoint:sp,kp:kp,ki:ki,kd:kd})})
-  .then(r=>{if(!r.ok){return r.text().then(t=>{throw new Error('HTTP '+r.status+': '+t)})}else{return r.json()}})
-  .then(d=>{document.getElementById('st').textContent=d.status;})
-  .catch(e=>{document.getElementById('st').textContent='PID err: '+e.message;console.error(e)})
+function setDriveMode(mode) {
+  fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({mode:mode})});
+  var cruiseEl = document.getElementById('cruiseBtn');
+  var wallEl = document.getElementById('wallBtn');
+  cruiseEl.classList.remove('on');
+  wallEl.classList.remove('on');
+  if (mode === 'cruise') {
+    cruiseEl.classList.add('on');
+    document.getElementById('modeLabel').textContent = 'Cruise';
+  } else if (mode === 'maintain') {
+    wallEl.classList.add('on');
+    document.getElementById('modeLabel').textContent = 'Maintain';
+  } else {
+    document.getElementById('modeLabel').textContent = 'Manual';
+  }
+}
+
+document.getElementById('cruiseBtn').onclick = function() { setDriveMode('cruise'); };
+document.getElementById('wallBtn').onclick = function() { setDriveMode('maintain'); };
+
+document.getElementById('stopBtn').onclick = function(){
+  fetch('/api/mode', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{"mode":"stop"}'});
+  document.getElementById('cruiseBtn').classList.remove('on');
+  document.getElementById('wallBtn').classList.remove('on');
+  document.getElementById('modeLabel').textContent = 'Manual';
+  fetch('/api/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({cmd:'stop',speed:0})});
 };
 
-const canvas=document.getElementById('graph');const ctx=canvas.getContext('2d');
+document.getElementById('spBtn').onclick = function(){
+  var sp = parseFloat(document.getElementById('spsp').value);
+  var kp = parseFloat(document.getElementById('spkp').value);
+  var ki = parseFloat(document.getElementById('spki').value);
+  var kd = parseFloat(document.getElementById('spkd').value);
+  if(isNaN(sp)||isNaN(kp)||isNaN(ki)||isNaN(kd)){document.getElementById('st').textContent='Invalid input';return}
+  document.getElementById('st').textContent='Sending...';
+  fetch('/api/pid', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({setpoint:sp,kp:kp,ki:ki,kd:kd})})
+  .then(function(r){if(!r.ok){return r.text().then(function(t){throw new Error('HTTP '+r.status+': '+t)})}else{return r.json()}})
+  .then(function(d){document.getElementById('st').textContent=d.status;})
+  .catch(function(e){document.getElementById('st').textContent='PID err: '+e.message;console.error(e)})
+};
+
+var canvas = document.getElementById('graph');
+var ctx = canvas.getContext('2d');
 function resizeCanvas(){canvas.width=canvas.parentElement.clientWidth-4;canvas.height=180}
 resizeCanvas();window.addEventListener('resize',resizeCanvas);
+
 function drawGraph(data){
-  const w=canvas.width,h=canvas.height,pad=12;const gw=w-pad*2,gh=h-pad*2;
+  var w=canvas.width, h=canvas.height, pad=12;
+  var gw=w-pad*2, gh=h-pad*2;
   ctx.clearRect(0,0,w,h);
   if(!data||!data.error||data.error.length<2)return;
-  let maxV=1;data.error.forEach(v=>{const a=Math.abs(v);if(a>maxV)maxV=a});
-  data.output.forEach(v=>{const a=Math.abs(v);if(a>maxV)maxV=a});
-  data.setpoint.forEach(v=>{const a=Math.abs(v);if(a>maxV)maxV=a});
+  var maxV=1;
+  data.error.forEach(function(v){var a=Math.abs(v);if(a>maxV)maxV=a;});
+  data.output.forEach(function(v){var a=Math.abs(v);if(a>maxV)maxV=a;});
+  data.setpoint.forEach(function(v){var a=Math.abs(v);if(a>maxV)maxV=a;});
   maxV=Math.ceil(maxV*1.2);if(maxV<5)maxV=5;
   ctx.strokeStyle='#e2e8f0';ctx.lineWidth=.5;
-  for(let i=0;i<=4;i++){const y=pad+(gh/4)*i;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}
-  const len=data.error.length;
-  const plot=(arr,col)=>{
+  for(var i=0;i<=4;i++){var y=pad+(gh/4)*i;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}
+  var len=data.error.length;
+  function plot(arr,col){
     ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.beginPath();
-    for(let i=0;i<len;i++){const x=pad+(i/(len-1))*gw;const y=pad+gh/2-(arr[i]/maxV)*(gh/2);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+    for(var i=0;i<len;i++){var x=pad+(i/(len-1))*gw;var y=pad+gh/2-(arr[i]/maxV)*(gh/2);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
     ctx.stroke()
-  };
+  }
   plot(data.error,'#dc2626');plot(data.output,'#3b82f6');plot(data.setpoint,'#16a34a');
   ctx.fillStyle='#94a3b8';ctx.font='8px sans-serif';ctx.fillText('+'+maxV,pad,pad+8);ctx.fillText('0',pad,pad+gh/2+3);ctx.fillText('-'+maxV,pad,h-pad-2);
   ctx.fillStyle='#dc2626';ctx.fillText('Error',w-45,pad+8);ctx.fillStyle='#3b82f6';ctx.fillText('Output',w-45,pad+18);ctx.fillStyle='#16a34a';ctx.fillText('Set',w-45,pad+28)
 }
 
 function setCellColor(id,val,thresh){
-  const el=document.getElementById(id+'Cell');
+  var el=document.getElementById(id+'Cell');
   if(val<0){el.className='sensor-cell safe';return}
   if(val<thresh/2){el.className='sensor-cell danger'}
   else if(val<thresh){el.className='sensor-cell warn'}
   else{el.className='sensor-cell safe'}
 }
 
-async function fd(){
-  try{
-    const r=await fetch('/api/status');const d=await r.json();
-    failCount=0;
-    document.getElementById('connDot').style.background='#22c55e';
-    document.getElementById('connTxt').textContent='ONLINE';document.getElementById('connTxt').style.color='#16a34a';
-    document.getElementById('sf').innerHTML=d.sensors.front.toFixed(1)+' cm';
-    document.getElementById('sl').innerHTML=d.sensors.left.toFixed(1)+' cm';
-    document.getElementById('sr').innerHTML=d.sensors.right.toFixed(1)+' cm';
-    document.getElementById('sb').innerHTML=d.sensors.back.toFixed(1)+' cm';
-    setCellColor('sf',d.sensors.front,40);setCellColor('sl',d.sensors.left,40);
-    setCellColor('sr',d.sensors.right,40);setCellColor('sb',d.sensors.back,15);
-    drawGraph(d.graph);
-    if(d.auto_mode){document.getElementById('autoBtn').classList.add('on');document.getElementById('modeLabel').textContent='Auto'}
-    else{document.getElementById('autoBtn').classList.remove('on');document.getElementById('modeLabel').textContent='Manual'}
-    document.getElementById('svAll').textContent=d.pid.output;
-    document.getElementById('spe').textContent=d.pid.error.toFixed(1);
-    document.getElementById('spo').textContent=d.pid.output.toFixed(0);
-  }catch(e){
-    failCount++;
-    if(failCount>=3){
-      document.getElementById('connDot').style.background='#ef4444';
-      document.getElementById('connTxt').textContent='OFFLINE';document.getElementById('connTxt').style.color='#dc2626';
-    }
-  }
-}
-setInterval(fd,300);fd();
+wsConnect();
+
+var httpFallback = setInterval(function() {
+  fetch('/api/status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) { updateUI(d); })
+    .catch(function() {});
+}, 500);
 </script>
 </body>
 </html>

@@ -1,5 +1,15 @@
 #include "pid_controller.h"
 
+#include <stdio.h>
+#include "nvs_flash.h"
+#include "nvs.h"
+
+#define NVS_NAMESPACE "pid"
+#define NVS_KEY_KP     "kp"
+#define NVS_KEY_KI     "ki"
+#define NVS_KEY_KD     "kd"
+#define NVS_KEY_SET    "setpoint"
+
 void pid_ctrl_init(pid_ctrl_t *pid, float kp, float ki, float kd, float dt,
                    float out_min, float out_max)
 {
@@ -82,4 +92,47 @@ void pid_ctrl_reset(pid_ctrl_t *pid)
     pid->prev_error = 0;
     pid->prev_measurement = 0;
     pid->prev_derivative = 0;
+}
+
+void pid_ctrl_save_to_nvs(pid_ctrl_t *pid, float setpoint)
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle) != ESP_OK) return;
+    nvs_set_i32(handle, NVS_KEY_KP, (int32_t)(pid->kp * 1000.0f));
+    nvs_set_i32(handle, NVS_KEY_KI, (int32_t)(pid->ki * 1000.0f));
+    nvs_set_i32(handle, NVS_KEY_KD, (int32_t)(pid->kd * 1000.0f));
+    nvs_set_i32(handle, NVS_KEY_SET, (int32_t)(setpoint * 1000.0f));
+    nvs_commit(handle);
+    nvs_close(handle);
+    printf("PID params saved to NVS\n");
+}
+
+int pid_ctrl_load_from_nvs(pid_ctrl_t *pid, float *setpoint)
+{
+    nvs_handle_t handle;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle) != ESP_OK) return -1;
+
+    int32_t val;
+    if (nvs_get_i32(handle, NVS_KEY_KP, &val) != ESP_OK) { nvs_close(handle); return -1; }
+    pid->kp = val / 1000.0f;
+
+    if (nvs_get_i32(handle, NVS_KEY_KI, &val) != ESP_OK) { nvs_close(handle); return -1; }
+    pid->ki = val / 1000.0f;
+
+    /* Migrate: if saved Ki < 0.10, treat NVS as stale (old defaults) */
+    if (pid->ki < 0.10f) {
+        nvs_close(handle);
+        printf("PID NVS stale, using new defaults\n");
+        return -1;
+    }
+
+    if (nvs_get_i32(handle, NVS_KEY_KD, &val) != ESP_OK) { nvs_close(handle); return -1; }
+    pid->kd = val / 1000.0f;
+
+    if (nvs_get_i32(handle, NVS_KEY_SET, &val) != ESP_OK) { nvs_close(handle); return -1; }
+    *setpoint = val / 1000.0f;
+
+    nvs_close(handle);
+    printf("PID params loaded from NVS\n");
+    return 0;
 }
