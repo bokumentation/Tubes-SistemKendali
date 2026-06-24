@@ -81,9 +81,9 @@ canvas{width:100%;height:180px;border-radius:6px;border:1px solid #e2e8f0;backgr
         <button id="spBtn">SET</button>
       </div>
       <div class="pid-info">
-        <span>Error: <b id="spe">0.0</b></span>
+        <span>Error: <b id="spe">0.0</b> cm</span>
         <span>Output: <b id="spo">0</b>%</span>
-        <span>Speed: <b id="svAll">0</b></span>
+        <span>Ctrl: <b id="svAll">0</b>%</span>
       </div>
     </div>
   </div>
@@ -269,26 +269,66 @@ function resizeCanvas(){canvas.width=canvas.parentElement.clientWidth-4;canvas.h
 resizeCanvas();window.addEventListener('resize',resizeCanvas);
 
 function drawGraph(data){
-  var w=canvas.width, h=canvas.height, pad=12;
+  var w=canvas.width, h=canvas.height, pad=14;
   var gw=w-pad*2, gh=h-pad*2;
   ctx.clearRect(0,0,w,h);
   if(!data||!data.error||data.error.length<2)return;
-  var maxV=1;
-  data.error.forEach(function(v){var a=Math.abs(v);if(a>maxV)maxV=a;});
-  data.output.forEach(function(v){var a=Math.abs(v);if(a>maxV)maxV=a;});
-  data.setpoint.forEach(function(v){var a=Math.abs(v);if(a>maxV)maxV=a;});
-  maxV=Math.ceil(maxV*1.2);if(maxV<5)maxV=5;
-  ctx.strokeStyle='#e2e8f0';ctx.lineWidth=.5;
-  for(var i=0;i<=4;i++){var y=pad+(gh/4)*i;ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke()}
+
   var len=data.error.length;
-  function plot(arr,col){
-    ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.beginPath();
-    for(var i=0;i<len;i++){var x=pad+(i/(len-1))*gw;var y=pad+gh/2-(arr[i]/maxV)*(gh/2);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
-    ctx.stroke()
+
+  var sp=data.setpoint[0];
+  var hasDist=data.distance&&data.distance.length===len;
+
+  var ymin=9999, ymax=-9999;
+  for(var i=0;i<len;i++){
+    var e=data.error[i], o=data.output[i];
+    if(e<ymin)ymin=e;if(e>ymax)ymax=e;
+    if(o<ymin)ymin=o;if(o>ymax)ymax=o;
+    if(hasDist){var dist=data.distance[i];if(dist<ymin)ymin=dist;if(dist>ymax)ymax=dist;}
   }
-  plot(data.error,'#dc2626');plot(data.output,'#3b82f6');plot(data.setpoint,'#16a34a');
-  ctx.fillStyle='#94a3b8';ctx.font='8px sans-serif';ctx.fillText('+'+maxV,pad,pad+8);ctx.fillText('0',pad,pad+gh/2+3);ctx.fillText('-'+maxV,pad,h-pad-2);
-  ctx.fillStyle='#dc2626';ctx.fillText('Error',w-45,pad+8);ctx.fillStyle='#3b82f6';ctx.fillText('Output',w-45,pad+18);ctx.fillStyle='#16a34a';ctx.fillText('Set',w-45,pad+28)
+  var range=ymax-ymin;
+  if(range<2)range=2;
+  ymin-=range*0.1; ymax+=range*0.1;
+
+  function toY(val){return pad+gh-(val-ymin)/(ymax-ymin)*gh;}
+
+  ctx.strokeStyle='#e2e8f0';ctx.lineWidth=.5;
+  var tickCount=4;
+  for(var i=0;i<=tickCount;i++){
+    var v=ymin+(ymax-ymin)*i/tickCount;
+    var y=toY(v);
+    ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(w-pad,y);ctx.stroke();
+    ctx.fillStyle='#94a3b8';ctx.font='7px sans-serif';
+    ctx.fillText(v.toFixed(0),2,Math.min(y+3,h-pad));
+  }
+
+  function plot(arr,col,dashed){
+    ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.beginPath();
+    if(dashed)ctx.setLineDash([3,2]);else ctx.setLineDash([]);
+    for(var i=0;i<len;i++){
+      var x=pad+(i/(len-1))*gw;
+      var y=toY(arr[i]);
+      i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();ctx.setLineDash([]);
+  }
+
+  if(data.setpoint&&data.setpoint.length===len)plot(data.setpoint,'#16a34a',true);
+  if(hasDist)plot(data.distance,'#f59e0b',false);
+  if(data.output&&data.output.length===len)plot(data.output,'#3b82f6',false);
+  if(data.error&&data.error.length===len)plot(data.error,'#dc2626',false);
+
+  var lx=w-52,ly=pad;
+  ctx.font='8px sans-serif';
+  ctx.fillStyle='#16a34a';ctx.fillText('Set',lx,ly+0);
+  ctx.fillStyle='#f59e0b';ctx.fillText('Dist',lx,ly+10);
+  ctx.fillStyle='#3b82f6';ctx.fillText('Out',lx,ly+20);
+  ctx.fillStyle='#dc2626';ctx.fillText('Err',lx,ly+30);
+
+  ctx.strokeStyle='#cbd5e1';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(pad,pad);ctx.lineTo(pad,h-pad);ctx.lineTo(w-pad,h-pad);ctx.stroke();
+  ctx.fillStyle='#94a3b8';ctx.font='7px sans-serif';
+  ctx.fillText('cm',2,pad-2);
 }
 
 function setCellColor(id,val,thresh){

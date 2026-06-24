@@ -84,6 +84,7 @@ volatile float pid_output_display = 0;
 float graph_error[GRAPH_SIZE];
 float graph_output[GRAPH_SIZE];
 float graph_setpoint[GRAPH_SIZE];
+float graph_distance[GRAPH_SIZE];
 int   graph_index = 0;
 int   graph_sample_count = 0;
 
@@ -257,14 +258,18 @@ static void avoid_task(void *arg)
             motor_fl_speed = fl;
             motor_br_speed = br;
             motor_bl_speed = bl;
-            pid_output_display = speed_out;
 
-            /* Record graph data */
-            graph_error[graph_index]   = min_front - speed_setpoint;
-            graph_output[graph_index]  = speed_out;
-            graph_setpoint[graph_index] = speed_setpoint;
-            graph_index = (graph_index + 1) % GRAPH_SIZE;
-            if (graph_sample_count < GRAPH_SIZE) graph_sample_count++;
+            /* pid_output_display and graph recording: only meaningful in MAINTAIN mode */
+            if (drive_mode == DRIVE_MODE_MAINTAIN && min_front >= 0) {
+                pid_output_display = speed_out;
+
+                graph_error[graph_index]    = speed_pid.prev_error;
+                graph_output[graph_index]   = speed_out;
+                graph_setpoint[graph_index]  = speed_setpoint;
+                graph_distance[graph_index] = min_front;
+                graph_index = (graph_index + 1) % GRAPH_SIZE;
+                if (graph_sample_count < GRAPH_SIZE) graph_sample_count++;
+            }
         }
 
         /* ==================================================== */

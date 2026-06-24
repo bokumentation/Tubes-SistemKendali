@@ -72,6 +72,7 @@ static cJSON *build_status_json(void)
     cJSON *err_arr = cJSON_CreateArray();
     cJSON *out_arr = cJSON_CreateArray();
     cJSON *sp_arr = cJSON_CreateArray();
+    cJSON *dist_arr = cJSON_CreateArray();
     int count = GRAPH_SIZE;
     if (graph_sample_count < count) count = graph_sample_count;
     for (int i = 0; i < count; i++) {
@@ -79,10 +80,12 @@ static cJSON *build_status_json(void)
         cJSON_AddItemToArray(err_arr, cJSON_CreateNumber(graph_error[idx]));
         cJSON_AddItemToArray(out_arr, cJSON_CreateNumber(graph_output[idx]));
         cJSON_AddItemToArray(sp_arr, cJSON_CreateNumber(graph_setpoint[idx]));
+        cJSON_AddItemToArray(dist_arr, cJSON_CreateNumber(graph_distance[idx]));
     }
     cJSON_AddItemToObject(graph, "error", err_arr);
     cJSON_AddItemToObject(graph, "output", out_arr);
     cJSON_AddItemToObject(graph, "setpoint", sp_arr);
+    cJSON_AddItemToObject(graph, "distance", dist_arr);
     cJSON_AddItemToObject(root, "graph", graph);
 
     return root;

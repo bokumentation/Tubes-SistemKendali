@@ -31,6 +31,7 @@ extern volatile float pid_output_display;
 extern float graph_error[GRAPH_SIZE];
 extern float graph_output[GRAPH_SIZE];
 extern float graph_setpoint[GRAPH_SIZE];
+extern float graph_distance[GRAPH_SIZE];
 extern int graph_index;
 extern int graph_sample_count;
 
