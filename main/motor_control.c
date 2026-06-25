@@ -14,7 +14,7 @@
 #define SPEED_TO_TICKS(s) ((uint32_t)((s) * 10))
 
 /* Motor dead zone: DRV8833 + N20 motors need at least this PWM% to overcome static friction */
-#define MOTOR_MIN_SPEED 30
+#define MOTOR_MIN_SPEED 32
 
 /* Each motor has its own operator, 2 comparators, 2 generators */
 typedef struct {
@@ -30,10 +30,16 @@ static motor_channel_t motor_fl;
 static motor_channel_t motor_br;
 static motor_channel_t motor_bl;
 
-static mcpwm_timer_handle_t timer_g0;  /* shared by FR, FL, BR */
-static mcpwm_timer_handle_t timer_g1;  /* used by BL */
+/* One timer per motor — matching hardware layout:
+ *   FR: UNIT_0 TIMER_0    FL: UNIT_0 TIMER_1
+ *   BR: UNIT_0 TIMER_2    BL: UNIT_1 TIMER_0
+ */
+static mcpwm_timer_handle_t timer_fr;
+static mcpwm_timer_handle_t timer_fl;
+static mcpwm_timer_handle_t timer_br;
+static mcpwm_timer_handle_t timer_bl;
 
-static esp_err_t create_shared_timer(int group_id, mcpwm_timer_handle_t *out_timer)
+static esp_err_t create_timer(int group_id, mcpwm_timer_handle_t *out_timer)
 {
     mcpwm_timer_config_t timer_cfg = {
         .group_id       = group_id,
@@ -152,21 +158,29 @@ void motor_control_init(void)
     if (initialized) return;
     initialized = true;
 
-    ESP_LOGI(TAG, "Initialising MCPWM motors (ESP-IDF v6)...");
+    ESP_LOGI(TAG, "Initialising MCPWM motors (4 timers, 1 per motor)...");
 
-    ESP_ERROR_CHECK(create_shared_timer(0, &timer_g0));
-    ESP_ERROR_CHECK(create_shared_timer(1, &timer_g1));
-
-    ESP_ERROR_CHECK(motor_channel_init(&motor_fr, 0, timer_g0,
+    /* FR: UNIT_0 TIMER_0 */
+    ESP_ERROR_CHECK(create_timer(0, &timer_fr));
+    ESP_ERROR_CHECK(motor_channel_init(&motor_fr, 0, timer_fr,
                                        MOTOR_FR_AIN1, MOTOR_FR_AIN2));
-    ESP_ERROR_CHECK(motor_channel_init(&motor_fl, 0, timer_g0,
+
+    /* FL: UNIT_0 TIMER_1 */
+    ESP_ERROR_CHECK(create_timer(0, &timer_fl));
+    ESP_ERROR_CHECK(motor_channel_init(&motor_fl, 0, timer_fl,
                                        MOTOR_FL_BIN1, MOTOR_FL_BIN2));
-    ESP_ERROR_CHECK(motor_channel_init(&motor_br, 0, timer_g0,
+
+    /* BR: UNIT_0 TIMER_2 */
+    ESP_ERROR_CHECK(create_timer(0, &timer_br));
+    ESP_ERROR_CHECK(motor_channel_init(&motor_br, 0, timer_br,
                                        MOTOR_BR_AIN1, MOTOR_BR_AIN2));
-    ESP_ERROR_CHECK(motor_channel_init(&motor_bl, 1, timer_g1,
+
+    /* BL: UNIT_1 TIMER_0 */
+    ESP_ERROR_CHECK(create_timer(1, &timer_bl));
+    ESP_ERROR_CHECK(motor_channel_init(&motor_bl, 1, timer_bl,
                                        MOTOR_BL_BIN1, MOTOR_BL_BIN2));
 
-    ESP_LOGI(TAG, "All motors initialised (1000 Hz PWM, 2 timers)");
+    ESP_LOGI(TAG, "All motors initialised (1000 Hz PWM, 4 timers)");
 }
 
 static void motor_set_single(motor_channel_t *ch, int32_t speed)

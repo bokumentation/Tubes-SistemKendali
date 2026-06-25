@@ -75,7 +75,7 @@ volatile int manual_override = 0;
 volatile int override_count  = 0;
 volatile int auto_mode       = 0;
 
-volatile float speed_setpoint = 40.0f;
+volatile float speed_setpoint = 25.0f;
 
 volatile int drive_mode      = DRIVE_MODE_CRUISE;
 
@@ -89,7 +89,7 @@ int   graph_index = 0;
 int   graph_sample_count = 0;
 
 /* ---- internal state ---- */
-static float prev_min_front = 999.0f;
+static float prev_front_cm = 999.0f;   /* EMA-filtered front distance from prev cycle */
 static bool  pid_was_active = false;   /* tracks whether PID was in control last iteration */
 
 /* ================================================================ */
@@ -154,9 +154,8 @@ static void avoid_task(void *arg)
 {
     esp_task_wdt_add(NULL);
 
-    /* Tuned PID: Kp=2.5  Ki=0.05  Kd=0.3  dt=0.05  out[0, 100] */
-    pid_ctrl_init(&speed_pid, 2.5f, 0.15f, 0.3f, PID_DT, -50, MAX_SPEED);
-    speed_pid.derivative_filter = 0.4f;   /* moderate D‑filtering */
+    pid_ctrl_init(&speed_pid, 0.8f, 0.05f, 0.1f, PID_DT, -50, MAX_SPEED);
+    speed_pid.derivative_filter = 0.5f;
 
     /* Restore PID params from NVS if available, otherwise save defaults */
     if (pid_ctrl_load_from_nvs(&speed_pid, (float *)&speed_setpoint) != 0) {
@@ -221,12 +220,13 @@ static void avoid_task(void *arg)
                         pid_ctrl_reset(&speed_pid);
                     }
 
-                    float pid_out = pid_ctrl_compute(&speed_pid, min_front, speed_setpoint);
+                    /* Use only front (center) sensor for PID to avoid oscillation */
+                    float pid_out = -pid_ctrl_compute(&speed_pid, speed_setpoint, sensor_front_cm);
                     speed_out = smooth_transition(min_front, pid_out);
 
                     /* Feed-forward braking (only when moving forward) */
                     if (speed_out > 0) {
-                        float velocity = (prev_min_front - min_front) / PID_DT;
+                        float velocity = (prev_front_cm - sensor_front_cm) / PID_DT;
                         if (min_front < BRAKE_RANGE && velocity > BRAKE_VEL_THRESH) {
                             speed_out -= velocity * BRAKE_GAIN;
                             if (speed_out < 0) speed_out = 0;
@@ -236,7 +236,7 @@ static void avoid_task(void *arg)
                     pid_was_active = true;
                 }
 
-                prev_min_front = min_front;
+                prev_front_cm = sensor_front_cm;
             }
 
             /* All wheels same speed — no rotation */
